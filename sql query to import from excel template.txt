@@ -1,0 +1,191 @@
+create or replace PROCEDURE INSERT_KFS_TRANS 
+(
+  PMAXROWS IN NUMBER DEFAULT 1000000,
+  INFISCAL IN NUMBER DEFAULT 2015
+) AS 
+
+CURSOR kfs_cursor IS
+  SELECT TT.acct,
+  TT.fy, 
+  TT.period,
+  case TT.period_code
+  when '01' THEN '01 Jul'
+  when '02' THEN '02 Aug'
+  when '03' THEN '03 Sep'
+  when '04' THEN '04 Oct'
+  when '05' THEN '05 Nov'
+  when '06' THEN '06 Dec'
+  when '07' THEN '07 Jan'
+  when '08' THEN '08 Feb'
+  when '09' THEN '09 Mar'
+  when '10' THEN '10 Apr'
+  when '11' THEN '11 May'
+  when '12' THEN '12 Jun'
+  else '12 Jun'
+  end mon2,
+  case  TT.period_code
+  when '1' then '01'
+  when '2' then '02'
+  when '3' then '03'
+  when '4' then '04'
+  when '5' then '05'
+  when '6' then '06'
+  when '7' then '07'
+  when '8' then '08'
+  when '9' then '09'
+  when '10' then '10'
+  when '11' then '11'
+  when '12' then '12'
+  else '12'
+  end period_code2,
+  TT.post_dt,
+  TT.tran_dt,
+  TT.tr_type,
+  TT.bal_type_cd,
+  TT.object_code,
+  TT.object_desc,
+  TT.tr_desc, 
+  TT.amount,
+  TT.budget,
+  TT.revenue,
+  TT.encumb,
+  to_number(to_char(sysdate,'MMDDYY'),999999) as tr_id,
+  TT.expense,
+  TT.obj_type, 
+  KK.cat_order, 
+  substr(KK.CAT_TR,1,20) as cat_description,
+  KK.kfs_descr,
+  TT.FDOC,
+  TT.org_code,
+  TT.event_type
+   FROM  ETHORITY_TRANS TT, kfs_subcodes KK
+  where tt.object_code = KK.kfs(+)
+  and tt.FY = infiscal
+  order by TT.tran_dt
+  ;
+  
+  kfs_record kfs_cursor%ROWTYPE;
+  
+  kfs_tab kfs_cursor%ROWTYPE;
+
+i NUMBER :=0;
+j NUMBER :=0;
+y NUMBER :=0;
+ecode NUMBER(38);
+notFound BOOLEAN := true;
+i_rand BINARY_INTEGER :=0;
+out_quote VARCHAR(300) ;
+
+TYPE object_code_tab_type IS TABLE OF  kfs_record.object_code%TYPE index by BINARY_INTEGER;
+object_tab object_code_tab_type;
+
+
+BEGIN
+ 
+ i_rand := to_number(DBMS_RANDOM.value(1,10));
+ 
+  OPEN kfs_cursor;
+  
+  FETCH kfs_cursor INTO kfs_record;
+  
+  kfs_tab := kfs_record;
+
+  WHILE (kfs_cursor%FOUND) AND (i <= pMaxRows) LOOP
+ 
+	i := i + 1;
+  IF  kfs_tab.org_code <> 'ZZZZ' THEN
+    INSERT into FTFILE (
+      acct,
+      fy,
+      period,
+      mon,
+      tr_date,
+      tr_type,
+      cat_order,
+      cat_tr,
+      subcode,
+      sc_descr,
+      tr_ref,
+      po_ref,
+      tr_descr,
+      budget,
+      expense,
+      revenue,
+      encumb,
+      tr_id,
+      event_type
+      )
+       values (
+      kfs_tab.acct,
+      kfs_tab.fy,
+      kfs_tab.period,
+      kfs_tab.mon2,
+      kfs_tab.tran_dt,
+      kfs_tab.tr_type,
+      kfs_tab.cat_order,
+      kfs_tab.cat_description,
+      kfs_tab.object_code,
+      kfs_tab.kfs_descr,
+      kfs_tab.fdoc,
+      kfs_tab.org_code,
+      kfs_tab.tr_desc,
+      kfs_tab.budget,
+      kfs_tab.expense,
+      kfs_tab.revenue,
+      kfs_tab.encumb,
+      kfs_tab.tr_id,
+      kfs_tab.event_type
+      );
+    IF SQL%ROWCOUNT = 1 THEN
+        y := y + 1;
+    END IF;
+   
+    IF kfs_tab.cat_order is null THEN
+      IF j = 0 THEN
+        object_tab(j) := kfs_tab.object_code;
+        j := j + 1;
+      ELSE
+        FOR m IN  0..j-1  LOOP
+          IF kfs_tab.object_code = object_tab(m)   THEN
+             notFound := false;
+          END IF;  
+        END LOOP;
+        if notFound THEN         -- NOT FOUND
+           object_tab(j) := kfs_tab.object_code;
+            j := j + 1;
+        end if;
+        notFound := TRUE;
+      END IF;
+    END IF; 
+    
+  END IF;
+  
+	FETCH kfs_cursor INTO kfs_record;
+    kfs_tab := kfs_record;
+	
+  END LOOP;
+  
+  CLOSE kfs_cursor;
+  
+  FOR k IN REVERSE 0..j-1 LOOP
+   DBMS_OUTPUT.PUT_LINE('missing object table: ' || object_tab(k) );
+ END LOOP;
+  
+  select quote into out_quote from KC_QUOTE_OF_THE_DAY where INDEX_NO = i_rand;
+  DBMS_OUTPUT.PUT_LINE('END   records read: ' || i);
+  DBMS_OUTPUT.PUT_LINE('END   records inserted: ' || y);
+   DBMS_OUTPUT.PUT_LINE(out_quote);
+  
+  commit;
+
+EXCEPTION
+  WHEN INVALID_CURSOR THEN
+    ecode := SQLCODE;
+    DBMS_OUTPUT.PUT_LINE('ERROR!! ' || '- ' || ecode);
+    ROLLBACK;
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('ERROR!! ' || '- ' || ecode);
+    ROLLBACK;
+    
+  
+END;
